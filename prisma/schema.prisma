@@ -24,6 +24,7 @@ model user {
 
 model movies {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
   genre       String
   rating      Int
   image       String
@@ -31,5 +32,6 @@ model movies {
   description String
   year        Int
   trailerUrl  String
-
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
