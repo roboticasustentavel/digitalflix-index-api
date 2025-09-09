@@ -99,120 +99,20 @@ const toNum = (v) => {
 // GET /movies — SOMENTE aggregateRaw (resiliente a nulos/inconsistências)
 app.get("/movies", async (req, res) => {
   try {
-    const {
-      search,
-      page = "1",
-      pageSize = "10",
-      featured,
-      minRating,
-      maxRating,
-      year,
-    } = req.query;
+    const { search } = req.query;
 
-    const currentPage = Math.max(1, Number(page) || 1);
-    const take = Math.max(1, Math.min(100, Number(pageSize) || 10));
-    const skip = (currentPage - 1) * take;
-
-    const hasSearch = typeof search === "string" && search.trim() !== "";
-    const fFeatured = toBool(featured);
-    const fMin = toNum(minRating);
-    const fMax = toNum(maxRating);
-    const fYear = toNum(year);
-
-    // $match dinâmico
-    const match = { $and: [] };
-
-    if (hasSearch) {
-      const term = String(search).trim();
-      match.$and.push({
-        $or: [
-          { title: { $regex: term, $options: "i" } },
-          { genre: { $regex: term, $options: "i" } },
-          { description: { $regex: term, $options: "i" } },
-        ],
-      });
-    }
-
-    if (fFeatured !== undefined) match.$and.push({ featured: fFeatured });
-    if (fMin !== undefined) match.$and.push({ rating: { $gte: fMin } });
-    if (fMax !== undefined) match.$and.push({ rating: { $lte: fMax } });
-    if (fYear !== undefined) match.$and.push({ year: fYear });
-
-    if (match.$and.length === 0) delete match.$and; // evita $and: []
-
-    // Pipeline: match → sort (robusto) → facet (items + total com paginação)
-    const pipeline = [
-      ...(match ? [{ $match: match }] : []),
-      { $sort: { year: -1, _id: -1 } }, // robusto: _id sempre existe; year ajuda
-      {
-        $facet: {
-          items: [
-            { $skip: skip },
-            { $limit: take },
-            {
-              // normaliza campos para evitar null/undefined no frontend
-              $project: {
-                id: { $toString: "$_id" },
-                title: { $ifNull: ["$title", "Sem título"] },
-                genre: { $ifNull: ["$genre", ""] },
-                rating: {
-                  $cond: [
-                    {
-                      $and: [
-                        { $ne: ["$rating", null] },
-                        { $gte: ["$rating", 0] },
-                      ],
-                    },
-                    "$rating",
-                    0,
-                  ],
-                },
-                image: { $ifNull: ["$image", ""] },
-                featured: {
-                  $cond: [{ $eq: ["$featured", true] }, true, false],
-                },
-                description: { $ifNull: ["$description", ""] },
-                year: {
-                  $cond: [
-                    {
-                      $and: [{ $ne: ["$year", null] }, { $gte: ["$year", 0] }],
-                    },
-                    "$year",
-                    null,
-                  ],
-                },
-                trailerUrl: { $ifNull: ["$trailerUrl", ""] },
-              },
+    const movies = await prisma.movies.findMany({
+      where: search
+        ? {
+            title: {
+              contains: search,
+              mode: "insensitive",
             },
-          ],
-          totalCount: [{ $count: "total" }],
-        },
-      },
-      {
-        $project: {
-          items: 1,
-          total: {
-            $cond: [
-              { $gt: [{ $size: "$totalCount" }, 0] },
-              { $arrayElemAt: ["$totalCount.total", 0] },
-              0,
-            ],
-          },
-        },
-      },
-    ];
-
-    const aggRes = await prisma.movies.aggregateRaw({ pipeline });
-    const items = aggRes?.items ?? [];
-    const total = Number(aggRes?.total ?? 0);
-
-    return res.json({
-      page: currentPage,
-      pageSize: take,
-      total,
-      totalPages: Math.ceil(total / take),
-      items,
+          }
+        : {},
     });
+
+    res.status(200).json(movies);
   } catch (err) {
     console.error("GET /movies error:", err);
     res.status(500).json({ error: "Erro ao listar filmes." });
